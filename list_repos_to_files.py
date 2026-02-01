@@ -70,9 +70,40 @@ def write_repo_md(rdata, outdir):
 
 
 def main():
-    token = os.getenv("GITHUB_TOKEN")
+    # Prefer token from ~/.proman, otherwise GITHUB_TOKEN env var
+    token = None
+    prom_file = os.path.expanduser("~/.proman")
+    if os.path.exists(prom_file):
+        try:
+            with open(prom_file, "r", encoding="utf-8") as pf:
+                for line in pf:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # allow comment lines and a special CURRENT_DATETIME marker
+                    if line.startswith("#"):
+                        # check comment content after leading '#'
+                        comment = line.lstrip("#").strip()
+                        if comment.lower().startswith("current_datetime:"):
+                            # extract value after ':' and set as env var if provided
+                            parts = comment.split(":", 1)
+                            if len(parts) > 1:
+                                os.environ.setdefault("CURRENT_DATETIME", parts[1].strip())
+                        continue
+                    # also allow bare 'current_datetime:' lines (non-comment)
+                    if line.lower().startswith("current_datetime:"):
+                        parts = line.split(":", 1)
+                        if len(parts) > 1:
+                            os.environ.setdefault("CURRENT_DATETIME", parts[1].strip())
+                        continue
+                    token = line
+                    break
+        except Exception:
+            token = None
     if not token:
-        print("Fehler: Bitte setze die Umgebungsvariable GITHUB_TOKEN mit deinem Personal Access Token.")
+        token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        print("Fehler: Bitte setze die Umgebungsvariable GITHUB_TOKEN oder lege ~/.proman mit dem Token an.")
         sys.exit(1)
 
     gh = Github(token)
@@ -93,7 +124,7 @@ def main():
         write_repo_md(rd, outdir)
 
     result = {
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": os.getenv("CURRENT_DATETIME") or (datetime.utcnow().isoformat() + "Z"),
         "user": getattr(user, "login", None),
         "count": len(repos_data),
         "repos": repos_data,
