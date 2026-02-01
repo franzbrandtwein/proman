@@ -142,8 +142,9 @@ def show_details(stdscr, rdata, token):
             if confirm and confirm.lower().startswith('y'):
                 try:
                     gh = Github(token)
-                    user = gh.get_user()
-                    user.delete_repo(rdata.get('name'))
+                    full = rdata.get('full_name') or f"{rdata.get('owner')}/{rdata.get('name')}"
+                    repo = gh.get_repo(full)
+                    repo.delete()
                     stdscr.clear()
                     stdscr.addstr(0, 0, f"Repo '{rdata.get('name')}' gelöscht.")
                     stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
