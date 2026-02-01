@@ -6,6 +6,7 @@ import os
 import sys
 import curses
 import textwrap
+import time
 
 try:
     import list_repos_to_files as lrf
@@ -52,6 +53,70 @@ def fetch_repos(token):
     user = gh.get_user()
     repos = list(user.get_repos())
     return user, repos
+
+
+def fetch_repos_progress(stdscr, token):
+    """Lädt Repositories mit einer einfachen Fortschrittsanzeige in der curses-Oberfläche."""
+    gh = Github(token)
+    user = gh.get_user()
+    pag = user.get_repos()
+    repos = []
+    total = getattr(pag, 'totalCount', None) or getattr(pag, 'total_count', None)
+    spinner = "|/-\\"
+    i = 0
+    h, w = stdscr.getmaxyx()
+    msg_row = max(0, h // 2)
+    # initial message
+    stdscr.clear()
+    stdscr.addstr(msg_row, 0, "Lade Repositories..."[: w - 1])
+    stdscr.refresh()
+    for r in pag:
+        repos.append(r)
+        i += 1
+        s = spinner[i % len(spinner)]
+        if total:
+            text = f"Lade Repos: {i}/{total} {s}"
+        else:
+            text = f"Lade Repos: {i} {s}"
+        stdscr.addstr(msg_row, 0, text.ljust(w - 1)[: w - 1])
+        stdscr.refresh()
+        time.sleep(0.05)
+    # finished
+    finished = f"Laden abgeschlossen. Gefundene Repos: {len(repos)}"
+    stdscr.addstr(msg_row, 0, finished[: w - 1])
+    stdscr.refresh()
+    time.sleep(0.2)
+    stdscr.clear()
+    stdscr.refresh()
+    return user, repos
+
+
+def build_repo_dicts_progress(stdscr, repos):
+    """Erstellt Repo-Dicts mit Fortschrittsanzeige während der Verarbeitung."""
+    repos_data = []
+    try:
+        total = len(repos)
+    except Exception:
+        total = None
+    spinner = "|/-\\"
+    h, w = stdscr.getmaxyx()
+    msg_row = max(0, h // 2 + 1)
+    for i, r in enumerate(repos, start=1):
+        rd = lrf.repo_to_dict(r)
+        repos_data.append(rd)
+        s = spinner[i % len(spinner)]
+        if total:
+            text = f"Verarbeite Repos: {i}/{total} {s}"
+        else:
+            text = f"Verarbeite Repos: {i} {s}"
+        stdscr.addstr(msg_row, 0, text.ljust(w - 1)[: w - 1])
+        stdscr.refresh()
+    stdscr.addstr(msg_row, 0, (f"Verarbeitung abgeschlossen. Repos verarbeitet: {len(repos_data)}")[: w - 1])
+    stdscr.refresh()
+    time.sleep(0.2)
+    stdscr.clear()
+    stdscr.refresh()
+    return repos_data
 
 
 def prompt_input(stdscr, prompt):
@@ -198,7 +263,7 @@ def main_curses(stdscr, token):
     curses.curs_set(0)
     stdscr.nodelay(False)
     try:
-        user, repos = fetch_repos(token)
+        user, repos = fetch_repos_progress(stdscr, token)
     except Exception as e:
         stdscr.clear()
         stdscr.addstr(0, 0, f"Fehler beim Abfragen der Repos: {e}")
@@ -207,7 +272,7 @@ def main_curses(stdscr, token):
         stdscr.getch()
         return
 
-    repos_data = [lrf.repo_to_dict(r) for r in repos]
+    repos_data = build_repo_dicts_progress(stdscr, repos)
     selected = 0
     title = f"Repos von {getattr(user, 'login', '')} - q zum Beenden, r zum Neu-Laden, c: Neues Repo"
 
@@ -222,8 +287,8 @@ def main_curses(stdscr, token):
             should_reload = show_details(stdscr, repos_data[selected], token)
             if should_reload:
                 try:
-                    user, repos = fetch_repos(token)
-                    repos_data = [lrf.repo_to_dict(r) for r in repos]
+                    user, repos = fetch_repos_progress(stdscr, token)
+                    repos_data = build_repo_dicts_progress(stdscr, repos)
                     selected = 0
                     title = f"Repos von {getattr(user, 'login', '')} - q zum Beenden, r zum Neu-Laden, c: Neues Repo"
                 except Exception as e:
@@ -239,8 +304,8 @@ def main_curses(stdscr, token):
             stdscr.refresh()
             stdscr.getch()
             try:
-                user, repos = fetch_repos(token)
-                repos_data = [lrf.repo_to_dict(r) for r in repos]
+                user, repos = fetch_repos_progress(stdscr, token)
+                repos_data = build_repo_dicts_progress(stdscr, repos)
                 selected = 0
                 title = f"Repos von {getattr(user, 'login', '')} - q zum Beenden, r zum Neu-Laden, c: Neues Repo"
             except Exception as e:
@@ -248,8 +313,8 @@ def main_curses(stdscr, token):
                 stdscr.getch()
         elif key == ord('r'):
             try:
-                user, repos = fetch_repos(token)
-                repos_data = [lrf.repo_to_dict(r) for r in repos]
+                user, repos = fetch_repos_progress(stdscr, token)
+                repos_data = build_repo_dicts_progress(stdscr, repos)
                 selected = 0
                 title = f"Repos von {getattr(user, 'login', '')} - q zum Beenden, r zum Neu-Laden, c: Neues Repo"
             except Exception as e:
