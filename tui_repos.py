@@ -7,6 +7,7 @@ import sys
 import curses
 import textwrap
 import time
+from datetime import datetime
 
 try:
     import list_repos_to_files as lrf
@@ -92,7 +93,10 @@ def fetch_repos_progress(stdscr, token):
 
 
 def build_repo_dicts_progress(stdscr, repos):
-    """Erstellt Repo-Dicts mit Fortschrittsanzeige während der Verarbeitung."""
+    """Erstellt Repo-Dicts mit Fortschrittsanzeige während der Verarbeitung.
+    Prüft für jedes Repo, ob ein lokales Verzeichnis ~/projekte/<name> existiert und
+    protokolliert den Vergleich nach ~/logs/proman.log.
+    """
     repos_data = []
     try:
         total = len(repos)
@@ -101,8 +105,30 @@ def build_repo_dicts_progress(stdscr, repos):
     spinner = "|/-\\"
     h, w = stdscr.getmaxyx()
     msg_row = max(0, h // 2 + 1)
+
+    logdir = os.path.expanduser("~/logs")
+    try:
+        os.makedirs(logdir, exist_ok=True)
+    except Exception:
+        logdir = None
+    logfile = os.path.join(logdir, "proman.log") if logdir else None
+
     for i, r in enumerate(repos, start=1):
         rd = lrf.repo_to_dict(r)
+        # Prüfen, ob lokal geklont ist (~/projekte/<repo_name>)
+        repo_name = rd.get('name') or rd.get('full_name')
+        local_path = os.path.expanduser(f"~/projekte/{repo_name}")
+        cloned = os.path.exists(local_path)
+        rd['cloned'] = cloned
+        # Loggen
+        ts = os.getenv("CURRENT_DATETIME") or (datetime.utcnow().isoformat() + "Z")
+        if logfile:
+            try:
+                with open(logfile, "a", encoding="utf-8") as lf:
+                    lf.write(f"{ts} compare repo={rd.get('full_name')} local_path={local_path} exists={cloned}\n")
+            except Exception:
+                pass
+
         repos_data.append(rd)
         s = spinner[i % len(spinner)]
         if total:
@@ -162,12 +188,21 @@ def draw_menu(stdscr, repos_data, selected_idx, title):
         if i >= h - 2:
             break
         name = f"{r.get('name', r.get('full_name'))}"[: w - 1]
+        is_cloned = bool(r.get('cloned'))
         if i == selected_idx:
-            stdscr.attron(curses.A_REVERSE)
+            attrs = curses.A_REVERSE
+            if is_cloned and curses.has_colors():
+                attrs |= curses.color_pair(1)
+            stdscr.attron(attrs)
             stdscr.addstr(i + 1, 0, name)
-            stdscr.attroff(curses.A_REVERSE)
+            stdscr.attroff(attrs)
         else:
-            stdscr.addstr(i + 1, 0, name)
+            if is_cloned and curses.has_colors():
+                stdscr.attron(curses.color_pair(1))
+                stdscr.addstr(i + 1, 0, name)
+                stdscr.attroff(curses.color_pair(1))
+            else:
+                stdscr.addstr(i + 1, 0, name)
     stdscr.refresh()
 
 
@@ -261,6 +296,13 @@ def show_details(stdscr, rdata, token):
 
 def main_curses(stdscr, token):
     curses.curs_set(0)
+    if curses.has_colors():
+        curses.start_color()
+        try:
+            curses.use_default_colors()
+        except Exception:
+            pass
+        curses.init_pair(1, curses.COLOR_GREEN, -1)
     stdscr.nodelay(False)
     try:
         user, repos = fetch_repos_progress(stdscr, token)
