@@ -8,6 +8,7 @@ import curses
 import textwrap
 import time
 from datetime import datetime
+import subprocess
 
 try:
     import list_repos_to_files as lrf
@@ -232,7 +233,7 @@ def show_details(stdscr, rdata, token):
             stdscr.addstr(y, 0, str(ln)[: w - 1])
             y += 1
 
-        stdscr.addstr(h - 3, 0, "d: Löschen  e: Bearbeiten  b: Zurück")
+        stdscr.addstr(h - 3, 0, "d: Löschen  e: Bearbeiten  l: Klonen  b: Zurück")
         stdscr.addstr(h - 2, 0, "q: Beenden")
         stdscr.refresh()
 
@@ -284,6 +285,70 @@ def show_details(stdscr, rdata, token):
             except Exception as e:
                 stdscr.clear()
                 stdscr.addstr(0, 0, f"Fehler beim Bearbeiten: {e}")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
+        elif key == ord('l'):
+            # Klonen nach ~/projekte/<repo_name> falls nicht vorhanden
+            repo_name = rdata.get('name') or rdata.get('full_name')
+            local_path = os.path.expanduser(f"~/projekte/{repo_name}")
+            if os.path.exists(local_path):
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Lokaler Pfad existiert bereits: {local_path}")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
+            # ensure parent dir
+            try:
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            except Exception:
+                pass
+            stdscr.clear()
+            stdscr.addstr(0, 0, f"Klonen nach {local_path} ...")
+            stdscr.refresh()
+            try:
+                res = subprocess.run(["git", "clone", rdata.get('html_url'), local_path], capture_output=True, text=True)
+                if res.returncode == 0:
+                    # log
+                    logdir = os.path.expanduser("~/logs")
+                    logfile = os.path.join(logdir, "proman.log") if logdir else None
+                    ts = os.getenv("CURRENT_DATETIME") or (datetime.utcnow().isoformat() + "Z")
+                    if logfile:
+                        try:
+                            with open(logfile, "a", encoding="utf-8") as lf:
+                                lf.write(f"{ts} clone repo={rdata.get('full_name')} local_path={local_path} success=True\n")
+                        except Exception:
+                            pass
+                    rdata['cloned'] = True
+                    stdscr.clear()
+                    stdscr.addstr(0, 0, f"Klonen erfolgreich: {local_path}")
+                    stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                    stdscr.refresh()
+                    stdscr.getch()
+                    return True
+                else:
+                    err = res.stderr or res.stdout
+                    stdscr.clear()
+                    stdscr.addstr(0, 0, f"Fehler beim Klonen: {err}"[: stdscr.getmaxyx()[1]-1])
+                    stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                    stdscr.refresh()
+                    stdscr.getch()
+                    # log failure
+                    logdir = os.path.expanduser("~/logs")
+                    logfile = os.path.join(logdir, "proman.log") if logdir else None
+                    ts = os.getenv("CURRENT_DATETIME") or (datetime.utcnow().isoformat() + "Z")
+                    if logfile:
+                        try:
+                            with open(logfile, "a", encoding="utf-8") as lf:
+                                lf.write(f"{ts} clone repo={rdata.get('full_name')} local_path={local_path} success=False error={err}\n")
+                        except Exception:
+                            pass
+                    continue
+            except Exception as e:
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Fehler beim Klonen: {e}")
                 stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
                 stdscr.refresh()
                 stdscr.getch()
