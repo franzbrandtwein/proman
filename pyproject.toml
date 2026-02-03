@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "pygithub>=2.8.1",
+    "pynvim>=0.6.0",
 ]
 
 [project.scripts]
@@ -18,3 +19,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["proman*"]
+
+[dependency-groups]
+dev = [
+    "ptpython>=3.0.32",
+]

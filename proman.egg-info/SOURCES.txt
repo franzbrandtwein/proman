@@ -2,6 +2,7 @@ README.md
 pyproject.toml
 proman/__init__.py
 proman/list_repos_to_files.py
+proman/neovim_commander.py
 proman/tui_repos.py
 proman.egg-info/PKG-INFO
 proman.egg-info/SOURCES.txt
