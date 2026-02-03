@@ -28,9 +28,44 @@ except Exception as e:
 
 
 def get_token():
-    token = None
+    """Liest ~/.proman oder fragt und speichert den Token, falls die Datei fehlt."""
     prom_file = os.path.expanduser("~/.proman")
-    if os.path.exists(prom_file):
+    token = None
+
+    # Wenn Datei nicht existiert: versuche ENV oder frage den Nutzer und speichere
+    if not os.path.exists(prom_file):
+        token = os.getenv("GITHUB_TOKEN")
+        if token:
+            try:
+                ts = os.getenv("CURRENT_DATETIME") or datetime.utcnow().isoformat()
+                with open(prom_file, "w", encoding="utf-8") as pf:
+                    pf.write(f"# current_datetime: {ts}\n")
+                    pf.write(token.strip() + "\n")
+                try:
+                    os.chmod(prom_file, 0o600)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        else:
+            try:
+                token = input("Kein ~/.proman gefunden. Bitte GitHub Token eingeben (wird in ~/.proman gespeichert): ").strip()
+            except Exception:
+                token = None
+            if token:
+                try:
+                    ts = os.getenv("CURRENT_DATETIME") or datetime.utcnow().isoformat()
+                    with open(prom_file, "w", encoding="utf-8") as pf:
+                        pf.write(f"# current_datetime: {ts}\n")
+                        pf.write(token.strip() + "\n")
+                    try:
+                        os.chmod(prom_file, 0o600)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+    else:
+        # Datei existiert: einlesen (unterstützt Kommentare und CURRENT_DATETIME Marker)
         try:
             with open(prom_file, "r", encoding="utf-8") as pf:
                 for line in pf:
@@ -38,13 +73,23 @@ def get_token():
                     if not line:
                         continue
                     if line.startswith("#"):
+                        # check comment content after leading '#'
+                        comment = line.lstrip("#").strip()
+                        if comment.lower().startswith("current_datetime:"):
+                            parts = comment.split(":", 1)
+                            if len(parts) > 1:
+                                os.environ.setdefault("CURRENT_DATETIME", parts[1].strip())
                         continue
                     if line.lower().startswith("current_datetime:"):
+                        parts = line.split(":", 1)
+                        if len(parts) > 1:
+                            os.environ.setdefault("CURRENT_DATETIME", parts[1].strip())
                         continue
                     token = line
                     break
         except Exception:
             token = None
+
     if not token:
         token = os.getenv("GITHUB_TOKEN")
     return token
@@ -535,11 +580,49 @@ def main_curses(stdscr, token):
                 stdscr.getch()
 
 
+def token_prompt_curses(stdscr):
+    """Zeigt ein einfaches Eingabefeld in curses, um den Token einzugeben."""
+    curses.curs_set(1)
+    curses.echo()
+    h, w = stdscr.getmaxyx()
+    prompt = "Kein Token gefunden. Bitte GitHub Token eingeben (wird in ~/.proman gespeichert): "
+    start_x = max(0, (w - len(prompt)) // 2)
+    stdscr.addstr(h // 2, start_x, prompt[: w - 1])
+    stdscr.refresh()
+    try:
+        s = stdscr.getstr(h // 2, start_x + len(prompt), 200)
+        if isinstance(s, bytes):
+            s = s.decode("utf-8", "ignore").strip()
+    finally:
+        curses.noecho()
+        curses.curs_set(0)
+    return s
+
+
 def main():
     token = get_token()
     if not token:
-        print("Kein GITHUB_TOKEN gefunden. Bitte setzen oder ~/.proman anlegen.")
-        sys.exit(1)
+        # Interaktives Eingabefeld in curses anzeigen
+        try:
+            token = curses.wrapper(token_prompt_curses)
+        except Exception:
+            token = None
+        if token:
+            try:
+                prom_file = os.path.expanduser("~/.proman")
+                ts = os.getenv("CURRENT_DATETIME") or datetime.utcnow().isoformat()
+                with open(prom_file, "w", encoding="utf-8") as pf:
+                    pf.write(f"# current_datetime: {ts}\n")
+                    pf.write(token.strip() + "\n")
+                try:
+                    os.chmod(prom_file, 0o600)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        else:
+            print("Kein GITHUB_TOKEN vorhanden. Abbruch.")
+            sys.exit(1)
     curses.wrapper(main_curses, token)
 
 
