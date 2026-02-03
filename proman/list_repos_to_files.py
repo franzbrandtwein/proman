@@ -25,6 +25,7 @@ def repo_to_dict(r):
         "private": r.private,
         "description": r.description,
         "html_url": r.html_url,
+        "ssh_url": r.ssh_url,
         "stargazers_count": r.stargazers_count,
         "forks_count": r.forks_count,
         "open_issues_count": r.open_issues_count,

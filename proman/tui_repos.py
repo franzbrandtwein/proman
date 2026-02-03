@@ -389,7 +389,7 @@ def show_details(stdscr, rdata, token):
             stdscr.addstr(0, 0, f"Klonen nach {local_path} ...")
             stdscr.refresh()
             try:
-                res = subprocess.run(["git", "clone", rdata.get('html_url'), local_path], capture_output=True, text=True)
+                res = subprocess.run(["git", "clone", rdata.get('ssh_url') or rdata.get('html_url'), local_path], capture_output=True, text=True)
                 if res.returncode == 0:
                     # log
                     logdir = os.path.expanduser("~/logs")
