@@ -9,6 +9,7 @@ import textwrap
 import time
 from datetime import datetime
 import subprocess
+import re
 
 try:
     import list_repos_to_files as lrf
@@ -55,6 +56,20 @@ def fetch_repos(token):
     user = gh.get_user()
     repos = list(user.get_repos())
     return user, repos
+
+
+def get_timestamp():
+    val = os.getenv("CURRENT_DATETIME")
+    if not val:
+        return datetime.utcnow().isoformat() + "Z"
+    # strip xml-like tags if present
+    try:
+        clean = re.sub(r'</?[^>]+>', '', val).strip()
+        if clean:
+            return clean
+    except Exception:
+        pass
+    return val
 
 
 def fetch_repos_progress(stdscr, token):
@@ -122,7 +137,7 @@ def build_repo_dicts_progress(stdscr, repos):
         cloned = os.path.exists(local_path)
         rd['cloned'] = cloned
         # Loggen
-        ts = os.getenv("CURRENT_DATETIME") or (datetime.utcnow().isoformat() + "Z")
+        ts = get_timestamp()
         if logfile:
             try:
                 with open(logfile, "a", encoding="utf-8") as lf:
@@ -233,7 +248,8 @@ def show_details(stdscr, rdata, token):
             stdscr.addstr(y, 0, str(ln)[: w - 1])
             y += 1
 
-        stdscr.addstr(h - 3, 0, "d: Löschen  e: Bearbeiten  l: Klonen  b: Zurück")
+        menu_line = ("d: Löschen  e: Bearbeiten  L: Lokal löschen  b: Zurück") if rdata.get('cloned') else ("d: Löschen  e: Bearbeiten  l: Klonen  b: Zurück")
+        stdscr.addstr(h - 3, 0, menu_line[: w - 1])
         stdscr.addstr(h - 2, 0, "q: Beenden")
         stdscr.refresh()
 
@@ -294,12 +310,32 @@ def show_details(stdscr, rdata, token):
             repo_name = rdata.get('name') or rdata.get('full_name')
             local_path = os.path.expanduser(f"~/projekte/{repo_name}")
             if os.path.exists(local_path):
-                stdscr.clear()
-                stdscr.addstr(0, 0, f"Lokaler Pfad existiert bereits: {local_path}")
-                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
-                stdscr.refresh()
-                stdscr.getch()
-                continue
+                # offer to delete local copy before cloning
+                confirm = prompt_input(stdscr, f"Lokaler Pfad existiert bereits: {local_path}. Lokal löschen und neu klonen? (y/N): ")
+                if confirm and confirm.lower().startswith('y'):
+                    try:
+                        import shutil as _sh
+                        _sh.rmtree(local_path)
+                        # log deletion
+                        logdir = os.path.expanduser("~/logs")
+                        logfile = os.path.join(logdir, "proman.log") if logdir else None
+                        ts = get_timestamp()
+                        if logfile:
+                            try:
+                                with open(logfile, "a", encoding="utf-8") as lf:
+                                    lf.write(f"{ts} local_delete_before_clone repo={rdata.get('full_name')} local_path={local_path} success=True\n")
+                            except Exception:
+                                pass
+                        # continue to clone
+                    except Exception as e:
+                        stdscr.clear()
+                        stdscr.addstr(0, 0, f"Fehler beim lokalen Löschen: {e}")
+                        stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                        stdscr.refresh()
+                        stdscr.getch()
+                        continue
+                else:
+                    continue
             # ensure parent dir
             try:
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
@@ -314,7 +350,7 @@ def show_details(stdscr, rdata, token):
                     # log
                     logdir = os.path.expanduser("~/logs")
                     logfile = os.path.join(logdir, "proman.log") if logdir else None
-                    ts = os.getenv("CURRENT_DATETIME") or (datetime.utcnow().isoformat() + "Z")
+                    ts = get_timestamp()
                     if logfile:
                         try:
                             with open(logfile, "a", encoding="utf-8") as lf:
@@ -338,7 +374,7 @@ def show_details(stdscr, rdata, token):
                     # log failure
                     logdir = os.path.expanduser("~/logs")
                     logfile = os.path.join(logdir, "proman.log") if logdir else None
-                    ts = os.getenv("CURRENT_DATETIME") or (datetime.utcnow().isoformat() + "Z")
+                    ts = get_timestamp()
                     if logfile:
                         try:
                             with open(logfile, "a", encoding="utf-8") as lf:
@@ -352,6 +388,77 @@ def show_details(stdscr, rdata, token):
                 stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
                 stdscr.refresh()
                 stdscr.getch()
+                continue
+        elif key == ord('L'):
+            # Lokales Löschen des geklonten Repos (nur unter ~/projekte)
+            repo_name = rdata.get('name') or rdata.get('full_name')
+            local_path = os.path.expanduser(f"~/projekte/{repo_name}")
+            if not os.path.exists(local_path):
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Lokaler Pfad nicht vorhanden: {local_path}")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
+            # Prüfen auf uncommitted changes
+            try:
+                st = subprocess.run(["git", "status", "--porcelain"], cwd=local_path, capture_output=True, text=True)
+                uncommitted = bool(st.stdout.strip())
+            except Exception:
+                uncommitted = None
+            # Prüfen auf unpushed commits (upstream)
+            ahead = None
+            behind = None
+            try:
+                rv = subprocess.run(["git", "rev-list", "--left-right", "--count", "@{u}...HEAD"], cwd=local_path, capture_output=True, text=True)
+                if rv.returncode == 0:
+                    parts = rv.stdout.strip().split()
+                    if len(parts) >= 2:
+                        behind = int(parts[0])
+                        ahead = int(parts[1])
+            except Exception:
+                pass
+            status_msg = f"Uncommitted changes: {('yes' if uncommitted else 'no' if uncommitted == False else 'unknown')}. Ahead={ahead if ahead is not None else '?'} Behind={behind if behind is not None else '?'}"
+            confirm = prompt_input(stdscr, status_msg + " Lokal löschen (verliert lokale Änderungen) bestätigen? (y/N): ")
+            if confirm and confirm.lower().startswith('y'):
+                # Sicherheitscheck: nur unter ~/projekte löschen
+                proj_root = os.path.abspath(os.path.expanduser("~/projekte"))
+                abs_local = os.path.abspath(local_path)
+                if not (abs_local == proj_root or abs_local.startswith(proj_root + os.sep)):
+                    stdscr.clear()
+                    stdscr.addstr(0, 0, "Abbruch: Pfad nicht unter ~/projekte, Sicherheitsabbruch.")
+                    stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                    stdscr.refresh()
+                    stdscr.getch()
+                    continue
+                try:
+                    import shutil as _sh
+                    _sh.rmtree(local_path)
+                    rdata['cloned'] = False
+                    # log
+                    logdir = os.path.expanduser("~/logs")
+                    logfile = os.path.join(logdir, "proman.log") if logdir else None
+                    ts = get_timestamp()
+                    if logfile:
+                        try:
+                            with open(logfile, "a", encoding="utf-8") as lf:
+                                lf.write(f"{ts} local_delete repo={rdata.get('full_name')} local_path={local_path} success=True\n")
+                        except Exception:
+                            pass
+                    stdscr.clear()
+                    stdscr.addstr(0, 0, f"Lokal gelöscht: {local_path}")
+                    stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                    stdscr.refresh()
+                    stdscr.getch()
+                    return True
+                except Exception as e:
+                    stdscr.clear()
+                    stdscr.addstr(0, 0, f"Fehler beim lokalen Löschen: {e}")
+                    stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                    stdscr.refresh()
+                    stdscr.getch()
+                    continue
+            else:
                 continue
         elif key in (ord('b'), ord('q'), 27):
             return False
