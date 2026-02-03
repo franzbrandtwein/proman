@@ -7,3 +7,14 @@ requires-python = ">=3.10"
 dependencies = [
     "pygithub>=2.8.1",
 ]
+
+[project.scripts]
+proman = "proman:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["proman*"]
