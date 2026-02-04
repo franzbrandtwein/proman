@@ -22,6 +22,7 @@ import json
 import tarfile
 import tempfile
 import platform
+from datetime import datetime
 from typing import Optional
 
 
@@ -114,6 +115,25 @@ def install_appimage(prefix: str = "~/.local", url: Optional[str] = None) -> str
 
     # Download to a temporary file in the bin_dir
     tmp_path = target + ".download"
+
+    # Log the chosen download URL for debugging
+    try:
+        logdir = os.path.expanduser("~/.local/share/proman")
+        os.makedirs(logdir, exist_ok=True)
+        logfile = os.path.join(logdir, "neovim_install.log")
+        ts = datetime.utcnow().isoformat() + "Z"
+        with open(logfile, "a", encoding="utf-8") as lf:
+            lf.write(f"{ts} download_url={url} kind={kind}\n")
+    except Exception:
+        # non-fatal logging failure
+        pass
+
+    # also emit to stdout for immediate visibility
+    try:
+        print(f"Downloading neovim from {url} (kind={kind})")
+    except Exception:
+        pass
+
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "proman-neovim-installierer"})
         with urllib.request.urlopen(req) as resp, open(tmp_path, "wb") as out:
