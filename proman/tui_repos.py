@@ -292,7 +292,7 @@ def show_details(stdscr, rdata, token):
             stdscr.addstr(y, 0, str(ln)[: w - 1])
             y += 1
 
-        menu_line = ("d: Löschen  e: Bearbeiten  L: Lokal löschen  b: Zurück") if rdata.get('cloned') else ("d: Löschen  e: Bearbeiten  l: Klonen  b: Zurück")
+        menu_line = ("d: Löschen  e: Bearbeiten  L: Lokal löschen  b: Zurück  g: Coding") if rdata.get('cloned') else ("d: Löschen  e: Bearbeiten  l: Klonen  b: Zurück  g: Coding")
         stdscr.addstr(h - 3, 0, menu_line[: w - 1])
         stdscr.addstr(h - 2, 0, "q: Beenden")
         stdscr.refresh()
@@ -322,6 +322,7 @@ def show_details(stdscr, rdata, token):
             else:
                 continue
         elif key == ord('e'):
+            new_name = prompt_input(stdscr, f"Neuer Name [{rdata.get('name')}]: ")
             new_name = prompt_input(stdscr, f"Neuer Name [{rdata.get('name')}]: ")
             if not new_name:
                 new_name = rdata.get('name')
@@ -504,6 +505,43 @@ def show_details(stdscr, rdata, token):
                     continue
             else:
                 continue
+        elif key == ord('g'):
+            repo_name = rdata.get('name') or rdata.get('full_name')
+            short = str(repo_name).split('/')[-1]
+            local_path = os.path.expanduser(f"~/projekte/{short}")
+            socket = os.path.join("/tmp", f"proman_{short}")
+            try:
+                try:
+                    from . import neovim_commander as nvc
+                except Exception:
+                    import neovim_commander as nvc
+            except Exception as e:
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Neovim commander nicht verfügbar: {e}")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
+            try:
+                if not os.path.exists(socket):
+                    proc, addr = nvc.start_server(address=socket, headless=True)
+                else:
+                    addr = socket
+                nvc.open_files(addr, [local_path], use_tabs=False)
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Neovim geöffnet: {local_path} (socket {addr})")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
+            except Exception as e:
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Fehler beim Starten/Öffnen: {e}")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
+
         elif key in (ord('b'), ord('q'), 27):
             return False
         else:

@@ -460,6 +460,42 @@ def show_details(stdscr, rdata, token):
                     continue
             else:
                 continue
+        elif key == ord('g'):
+            repo_name = rdata.get('name') or rdata.get('full_name')
+            short = str(repo_name).split('/')[-1]
+            local_path = os.path.expanduser(f"~/projekte/{short}")
+            socket = os.path.join("/tmp", f"proman_{short}")
+            try:
+                try:
+                    from proman import neovim_commander as nvc
+                except Exception:
+                    import neovim_commander as nvc
+            except Exception as e:
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Neovim commander nicht verfügbar: {e}")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
+            try:
+                if not os.path.exists(socket):
+                    proc, addr = nvc.start_server(address=socket, headless=True)
+                else:
+                    addr = socket
+                nvc.open_files(addr, [local_path], use_tabs=False)
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Neovim geöffnet: {local_path} (socket {addr})")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
+            except Exception as e:
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Fehler beim Starten/Öffnen: {e}")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
         elif key in (ord('b'), ord('q'), 27):
             return False
         else:
