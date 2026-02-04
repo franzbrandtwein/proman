@@ -19,14 +19,20 @@ import shutil
 import urllib.request
 import urllib.error
 import json
+import tarfile
+import tempfile
+import platform
 from typing import Optional
 
 
 APPIMAGE_LATEST_URL = "https://github.com/neovim/neovim/releases/latest/download/nvim.appimage"
 
 
-def _get_latest_appimage_url() -> str:
-    """Query GitHub API for the latest neovim release and return an AppImage asset URL if available."""
+def _get_latest_asset() -> dict:
+    """Query GitHub API for the latest neovim release and return a suitable asset URL and kind.
+
+    Returns a dict: {"url": <browser_download_url>, "kind": "appimage"|"tarball"}
+    """
     api = "https://api.github.com/repos/neovim/neovim/releases/latest"
     req = urllib.request.Request(api, headers={"User-Agent": "proman-neovim-installierer"})
     try:
@@ -36,15 +42,37 @@ def _get_latest_appimage_url() -> str:
         raise RuntimeError(f"Fehler beim Abfragen der GitHub Releases API: {e}")
 
     assets = data.get("assets", []) or []
+    arch = platform.machine().lower()
+    arch_aliases = []
+    if arch in ("x86_64", "amd64"):
+        arch_aliases = ["x86_64", "linux64", "amd64", "x86-64"]
+    elif arch in ("aarch64", "arm64"):
+        arch_aliases = ["aarch64", "arm64"]
+    else:
+        arch_aliases = [arch]
+
+    # Prefer AppImage when available
     for a in assets:
         name = (a.get("name") or "").lower()
+        url = a.get("browser_download_url")
+        if not url:
+            continue
         if "appimage" in name:
-            url = a.get("browser_download_url")
-            if url:
-                return url
+            # accept regardless of arch tag; AppImage often is portable
+            return {"url": url, "kind": "appimage"}
 
-    # fallback: try the static "latest/download" URL (may 404)
-    return APPIMAGE_LATEST_URL
+    # Prefer tarball matching architecture
+    for a in assets:
+        name = (a.get("name") or "").lower()
+        url = a.get("browser_download_url")
+        if not url:
+            continue
+        if any(ext in name for ext in ["tar.gz", "tar.xz", "tar.bz2"]):
+            if any(k in name for k in arch_aliases) or "linux" in name:
+                return {"url": url, "kind": "tarball"}
+
+    # fallback to static appimage url
+    return {"url": APPIMAGE_LATEST_URL, "kind": "appimage"}
 
 
 def is_nvim_installed() -> bool:
@@ -69,7 +97,11 @@ def install_appimage(prefix: str = "~/.local", url: Optional[str] = None) -> str
         raise NotImplementedError("install_appimage ist nur unter Linux unterstützt")
 
     if url is None:
-        url = _get_latest_appimage_url()
+        info = _get_latest_asset()
+        url = info.get('url')
+        kind = info.get('kind')
+    else:
+        kind = 'appimage'
 
     prefix = os.path.expanduser(prefix)
     bin_dir = os.path.join(prefix, "bin")
@@ -102,6 +134,52 @@ def install_appimage(prefix: str = "~/.local", url: Optional[str] = None) -> str
         except Exception:
             pass
         raise RuntimeError(f"Fehler beim Herunterladen von nvim.appimage: {e}")
+
+    # If downloaded tarball, extract nvim binary
+    if kind == 'tarball':
+        tmpdir = tempfile.mkdtemp(prefix='nvim_extract_')
+        try:
+            try:
+                with tarfile.open(tmp_path) as tf:
+                    tf.extractall(path=tmpdir)
+            except Exception as e:
+                raise RuntimeError(f"Fehler beim Entpacken des Tarballs: {e}")
+            # search for bin/nvim
+            nvim_src = None
+            for root, dirs, files in os.walk(tmpdir):
+                if 'nvim' in files and os.path.basename(root) == 'bin':
+                    nvim_src = os.path.join(root, 'nvim')
+                    break
+            if not nvim_src:
+                # try common path
+                for root, dirs, files in os.walk(tmpdir):
+                    if 'nvim' in files:
+                        possible = os.path.join(root, 'nvim')
+                        # check ELF
+                        try:
+                            if os.path.getsize(possible) > 0:
+                                nvim_src = possible
+                                break
+                        except Exception:
+                            continue
+            if not nvim_src or not os.path.exists(nvim_src):
+                raise RuntimeError("Konnte nvim-Binärdatei im heruntergeladenen Tarball nicht finden")
+            # move to target
+            os.replace(nvim_src, target)
+            st = os.stat(target)
+            os.chmod(target, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        finally:
+            # cleanup
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+            try:
+                shutil.rmtree(tmpdir)
+            except Exception:
+                pass
+        return target
 
     # Make executable and move into place
     try:
