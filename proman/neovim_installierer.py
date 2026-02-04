@@ -26,53 +26,14 @@ from datetime import datetime
 from typing import Optional
 
 
-APPIMAGE_LATEST_URL = "https://github.com/neovim/neovim/releases/latest/download/nvim.appimage"
+APPIMAGE_LATEST_URL = "https://github.com/neovim/neovim-releases/releases/download/v0.11.5/nvim-linux-x86_64.appimage"
 
 
 def _get_latest_asset() -> dict:
-    """Query GitHub API for the latest neovim release and return a suitable asset URL and kind.
+    """Return the configured static AppImage URL.
 
-    Returns a dict: {"url": <browser_download_url>, "kind": "appimage"|"tarball"}
+    This installer uses a pinned AppImage URL instead of querying the GitHub API.
     """
-    api = "https://api.github.com/repos/neovim/neovim/releases/latest"
-    req = urllib.request.Request(api, headers={"User-Agent": "proman-neovim-installierer"})
-    try:
-        with urllib.request.urlopen(req) as resp:
-            data = json.load(resp)
-    except Exception as e:
-        raise RuntimeError(f"Fehler beim Abfragen der GitHub Releases API: {e}")
-
-    assets = data.get("assets", []) or []
-    arch = platform.machine().lower()
-    arch_aliases = []
-    if arch in ("x86_64", "amd64"):
-        arch_aliases = ["x86_64", "linux64", "amd64", "x86-64"]
-    elif arch in ("aarch64", "arm64"):
-        arch_aliases = ["aarch64", "arm64"]
-    else:
-        arch_aliases = [arch]
-
-    # Prefer AppImage when available
-    for a in assets:
-        name = (a.get("name") or "").lower()
-        url = a.get("browser_download_url")
-        if not url:
-            continue
-        if "appimage" in name:
-            # accept regardless of arch tag; AppImage often is portable
-            return {"url": url, "kind": "appimage"}
-
-    # Prefer tarball matching architecture
-    for a in assets:
-        name = (a.get("name") or "").lower()
-        url = a.get("browser_download_url")
-        if not url:
-            continue
-        if any(ext in name for ext in ["tar.gz", "tar.xz", "tar.bz2"]):
-            if any(k in name for k in arch_aliases) or "linux" in name:
-                return {"url": url, "kind": "tarball"}
-
-    # fallback to static appimage url
     return {"url": APPIMAGE_LATEST_URL, "kind": "appimage"}
 
 
@@ -118,15 +79,34 @@ def install_appimage(prefix: str = "~/.local", url: Optional[str] = None) -> str
 
     # Log the chosen download URL for debugging
     try:
-        logdir = os.path.expanduser("~/.local/share/proman")
+        base = os.environ.get('XDG_DATA_HOME') or os.path.expanduser('~/.local/share')
+        logdir = os.path.join(os.path.expanduser(base), "proman")
         os.makedirs(logdir, exist_ok=True)
         logfile = os.path.join(logdir, "neovim_install.log")
         ts = datetime.utcnow().isoformat() + "Z"
-        with open(logfile, "a", encoding="utf-8") as lf:
-            lf.write(f"{ts} download_url={url} kind={kind}\n")
-    except Exception:
-        # non-fatal logging failure
-        pass
+        try:
+            with open(logfile, "a", encoding="utf-8") as lf:
+                lf.write(f"{ts} download_url={url} kind={kind}\n")
+        except Exception as e:
+            # fallback to /tmp
+            try:
+                tmpdir = os.path.join(tempfile.gettempdir(), 'proman')
+                os.makedirs(tmpdir, exist_ok=True)
+                logfile = os.path.join(tmpdir, 'neovim_install.log')
+                with open(logfile, 'a', encoding='utf-8') as lf:
+                    lf.write(f"{ts} download_url={url} kind={kind} fallback_write=1\n")
+            except Exception:
+                # final fallback: print to stderr
+                try:
+                    print(f"[neovim_installierer] log write failed: {e}", file=sys.stderr)
+                except Exception:
+                    pass
+    except Exception as e:
+        # non-fatal logging failure, print to stderr as last resort
+        try:
+            print(f"[neovim_installierer] could not prepare logdir: {e}", file=sys.stderr)
+        except Exception:
+            pass
 
     # also emit to stdout for immediate visibility
     try:
