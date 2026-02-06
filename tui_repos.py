@@ -222,6 +222,112 @@ def draw_menu(stdscr, repos_data, selected_idx, title):
     stdscr.refresh()
 
 
+def setup_flow(stdscr, token):
+    """Install nvim if missing and all plugins listed in daten/nvim.csv."""
+    curses.curs_set(0)
+    stdscr.clear()
+    h, w = stdscr.getmaxyx()
+    stdscr.addstr(0, 0, "Setup: Prüfe nvim-Installation...")
+    stdscr.refresh()
+    # ensure nvim
+    try:
+        try:
+            from proman import neovim_installierer as installer
+        except Exception:
+            try:
+                from . import neovim_installierer as installer
+            except Exception:
+                import neovim_installierer as installer
+        nvim_path = installer.ensure_nvim()
+        stdscr.addstr(1, 0, f"nvim verfügbar: {nvim_path}"[: w - 1])
+    except Exception as e:
+        stdscr.addstr(1, 0, f"Fehler beim Installieren von nvim: {e}"[: w - 1])
+        stdscr.addstr(2, 0, "Beliebige Taste zum Fortfahren.")
+        stdscr.refresh()
+        stdscr.getch()
+        return False
+
+    stdscr.addstr(2, 0, "Installiere Plugins aus daten/nvim.csv...")
+    stdscr.refresh()
+
+    # read CSV and install plugins
+    try:
+        try:
+            from proman import csv_data
+        except Exception:
+            try:
+                from . import csv_data
+            except Exception:
+                import csv_data as csv_data
+        rows = csv_data.read_nvim_csv()
+    except Exception as e:
+        stdscr.addstr(3, 0, f"Fehler beim Lesen von daten/nvim.csv: {e}"[: w - 1])
+        stdscr.addstr(4, 0, "Beliebige Taste zum Fortfahren.")
+        stdscr.refresh()
+        stdscr.getch()
+        return False
+
+    try:
+        from proman import nvim_plugins as plugins
+    except Exception:
+        try:
+            from . import nvim_plugins as plugins
+        except Exception:
+            import nvim_plugins as plugins
+
+    y = 4
+    success = 0
+    for i, row in enumerate(rows, start=1):
+        candidates = ["repo", "url", "git", "ssh_url", "ssh", "clone_url", "https", "git_url", "clone"]
+        repo_url = None
+        for c in candidates:
+            v = row.get(c)
+            if v:
+                sv = v.strip()
+                if sv.startswith("git@") or sv.startswith("http") or "github.com" in sv:
+                    repo_url = sv
+                    break
+        if not repo_url:
+            for k, v in row.items():
+                if not v:
+                    continue
+                sv = str(v).strip()
+                if sv.startswith("git@") or sv.startswith("http") or "github.com" in sv:
+                    repo_url = sv
+                    break
+        name = row.get("name") or row.get("plugin") or None
+        stdscr.addstr(y, 0, f"{i}/{len(rows)}: Installiere {repo_url or '<no-url>'}..."[: w - 1])
+        stdscr.clrtoeol()
+        stdscr.refresh()
+        if not repo_url:
+            stdscr.addstr(y+1, 0, f"Übersprungen: Keine URL gefunden in Zeile {i}"[: w - 1])
+            y += 2
+            if y >= h - 2:
+                stdscr.addstr(h - 1, 0, "Weiter mit Taste...")
+                stdscr.refresh()
+                stdscr.getch()
+                stdscr.clear()
+                y = 0
+            continue
+        try:
+            dest = plugins.install_plugin(repo_url, name=name, pack_name="proman", update=False)
+            stdscr.addstr(y+1, 0, f"Erfolgreich: {dest}"[: w - 1])
+            success += 1
+        except Exception as e:
+            stdscr.addstr(y+1, 0, f"Fehler: {e}"[: w - 1])
+        y += 2
+        if y >= h - 2:
+            stdscr.addstr(h - 1, 0, "Weiter mit Taste...")
+            stdscr.refresh()
+            stdscr.getch()
+            stdscr.clear()
+            y = 0
+    stdscr.addstr(h - 2, 0, f"Installiert: {success}/{len(rows)} Plugins. Beliebige Taste.")
+    stdscr.refresh()
+    stdscr.getch()
+    return True
+
+
 def show_details(stdscr, rdata, token):
     # interaktive Detailansicht mit Optionen zum Löschen und Bearbeiten
     while True:
@@ -512,6 +618,46 @@ def main_curses(stdscr, token):
             pass
         curses.init_pair(1, curses.COLOR_GREEN, -1)
     stdscr.nodelay(False)
+
+    # Hauptmenü: Auswahl vor dem Anzeigen der Repo-Liste
+    main_items = ["Projekte", "Setup"]
+    selected_main = 0
+    while True:
+        stdscr.clear()
+        h, w = stdscr.getmaxyx()
+        title = f"Proman Hauptmenü - {get_timestamp()}"
+        stdscr.addstr(0, 0, title[: w - 1])
+        for i, item in enumerate(main_items):
+            if i == selected_main:
+                stdscr.attron(curses.A_REVERSE)
+                stdscr.addstr(i + 2, 0, item[: w - 1])
+                stdscr.attroff(curses.A_REVERSE)
+            else:
+                stdscr.addstr(i + 2, 0, item[: w - 1])
+        stdscr.addstr(h - 1, 0, "q: Beenden")
+        stdscr.refresh()
+        key = stdscr.getch()
+        if key in (curses.KEY_UP, ord('k')):
+            selected_main = max(0, selected_main - 1)
+        elif key in (curses.KEY_DOWN, ord('j')):
+            selected_main = min(len(main_items) - 1, selected_main + 1)
+        elif key in (10, 13):
+            sel = main_items[selected_main].lower()
+            if sel.startswith("projekte"):
+                break
+            if sel.startswith("setup"):
+                try:
+                    ok = setup_flow(stdscr, token)
+                except Exception as e:
+                    stdscr.clear()
+                    stdscr.addstr(0, 0, f"Setup Fehler: {e}")
+                    stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                    stdscr.refresh()
+                    stdscr.getch()
+                continue
+        elif key in (ord('q'), 27):
+            return
+
     try:
         user, repos = fetch_repos_progress(stdscr, token)
     except Exception as e:
