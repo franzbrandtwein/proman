@@ -380,7 +380,7 @@ def show_details(stdscr, rdata, token):
             stdscr.addstr(y, 0, str(ln)[: w - 1])
             y += 1
 
-        menu_line = ("d: Löschen  e: Bearbeiten  L: Lokal löschen  b: Zurück  g: Coding") if rdata.get('cloned') else ("d: Löschen  e: Bearbeiten  l: Klonen  b: Zurück  g: Coding")
+        menu_line = ("d: Löschen  e: Edit  L: Lokal löschen  b: Zurück  g: Coding  n: Nvim tmux") if rdata.get('cloned') else ("d: Löschen  e: Edit  l: Klonen  b: Zurück  g: Coding")
         stdscr.addstr(h - 3, 0, menu_line[: w - 1])
         stdscr.addstr(h - 2, 0, "q: Beenden")
         stdscr.refresh()
@@ -630,6 +630,50 @@ def show_details(stdscr, rdata, token):
                 stdscr.getch()
                 continue
 
+        elif key == ord('n'):
+            # Öffne Neovim im Projektverzeichnis in einem neuen tmux pane
+            if not rdata.get('cloned'):
+                stdscr.clear()
+                stdscr.addstr(0, 0, "Repository ist noch nicht lokal geklont.")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
+            repo_name = rdata.get('name') or rdata.get('full_name')
+            short = str(repo_name).split('/')[-1]
+            local_path = os.path.expanduser(f"~/projekte/{short}")
+            if not os.path.exists(local_path):
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Lokaler Pfad nicht vorhanden: {local_path}")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
+            try:
+                # Prüfe ob wir in einer tmux session sind
+                tmux_check = subprocess.run(["tmux", "display-message", "-p", "#S"], capture_output=True, text=True)
+                if tmux_check.returncode != 0:
+                    stdscr.clear()
+                    stdscr.addstr(0, 0, "Nicht in einer tmux session. Bitte starte tmux.")
+                    stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                    stdscr.refresh()
+                    stdscr.getch()
+                    continue
+                # Öffne neovim in einem neuen pane
+                subprocess.run(["tmux", "split-window", "-h", f"nvim {local_path}"])
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Neovim geöffnet in tmux pane: {local_path}")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
+            except Exception as e:
+                stdscr.clear()
+                stdscr.addstr(0, 0, f"Fehler beim Öffnen von Neovim in tmux: {e}")
+                stdscr.addstr(1, 0, "Beliebige Taste zum Fortfahren.")
+                stdscr.refresh()
+                stdscr.getch()
+                continue
         elif key in (ord('b'), ord('q'), 27):
             return False
         else:
